@@ -1,192 +1,357 @@
-# env 파일 읽기
 from dotenv import load_dotenv
 load_dotenv()
 
+import json
+from typing import List, Optional
+
+# (Deprecation 경고를 없애려면):
+# from langchain_community.chat_models import ChatOpenAI
+# from langchain_community.memory import ConversationBufferMemory
 from langchain.chat_models import ChatOpenAI
 from langchain.memory import ConversationBufferMemory
+
 from langgraph.graph import StateGraph
-import json
 
-# GPT 모델 로드
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
+# pydantic (2.x 기준)
+from pydantic import BaseModel, Field
 
-# 대화 메모리 (이전 대화 저장)
-memory = ConversationBufferMemory(memory_key="history", return_messages=True)
+# -------------------------
+# 1) Pydantic 모델 정의
+# -------------------------
+class MazeState(BaseModel):
+    setting: str
+    atmosphere: str
 
-# 게임 상태 관리
-class GameState:
-    def __init__(self, setting, atmosphere):
-        self.setting = setting  # 사용자가 입력한 장소
-        self.atmosphere = atmosphere  # 사용자가 입력한 분위기
-        self.step = "start"
-        self.inventory = []
-        self.history = []
-        self.location = "미로 입구"
-        self.story_data = None  # GPT가 생성한 스토리 데이터 저장
+    step: str = "start"
+    message: str = ""
+    next: str = ""
 
+    inventory: List[str] = Field(default_factory=list)
+    history: List[str] = Field(default_factory=list)
+    location: str = "미로 입구"
+    story_data: Optional[dict] = None
 
-# 1. GPT를 사용해 세계관, 스토리, NPC 자동 생성
-def generate_story(state):
+    # NPC 질문 시 플레이어의 최신 선택
+    player_answer: str = ""
+
+# -------------------------
+# 2) GPT 모델 설정
+# -------------------------
+llm = ChatOpenAI(
+    model="gpt-4o-mini",   # 실제 OpenAI 모델을 쓰려면 "gpt-3.5-turbo" 등 사용
+    temperature=0.7
+)
+memory = ConversationBufferMemory(return_messages=True)
+
+# -------------------------
+# 3) 노드 함수들
+# -------------------------
+
+def generate_story(state: MazeState) -> MazeState:
+    """
+    1) start 노드
+    - 장소/분위기 정보를 바탕으로, 세계관/목표/NPC들을 JSON 형식으로 생성.
+    - 그 내용을 state.story_data에 저장
+    - 다음 노드: first_encounter_question
+    """
     prompt = f"""
     당신은 텍스트 기반 미로 탐험 게임의 스토리 마스터입니다.
-    플레이어가 미로의 장소로 '{state.setting}', 분위기로 '{state.atmosphere}'을(를) 입력했습니다.
+    플레이어가 미로의 장소로 '{state.setting}', 분위기로 '{state.atmosphere}'를 입력했습니다.
 
     이 설정을 기반으로 흥미로운 미로 탐험 스토리를 만들어 주세요.
-    - 미로의 세계관을 3~4문장으로 설명
-    - 미로에서 플레이어가 찾아야 할 중요한 목표 (예: 마법의 보석, 고대 문서 등)
-    - 최소 3명의 NPC를 만들고, 각 NPC의 역할을 설명 (NPC는 미로에 있는 안내자, 적대자, 함정을 줄 수도 있음)
-    - 플레이어가 만날 NPC들의 순서를 정리
 
-    JSON 형식으로 출력해주세요.
+    출력은 반드시 **순수 JSON** 형태여야 합니다. (추가 설명 X)
+    예시:
+    {{
+      "world_description": "string",
+      "objective": "string",
+      "npcs": [
+        {{"name": "string", "role": "string"}},
+        ...
+      ]
+    }}
     """
-    
     response = llm.invoke(prompt).content
-    story_data = json.loads(response)
-    state.story_data = story_data  # 스토리 저장
+    try:
+        story_data = json.loads(response)
+    except json.JSONDecodeError:
+        print("LLM이 JSON 형식으로 응답하지 않았습니다. (재시도/처리 필요)")
+        print(response)
+        raise ValueError("Invalid JSON from LLM response")
 
-    return {
-        "message": f"게임이 시작되었습니다! {story_data['world_description']}\n"
-                   f"당신의 목표는 '{story_data['objective']}' 입니다.\n"
-                   "앞으로 나아가시겠습니까?",
-        "next": "first_encounter"
-    }
+    state.story_data = story_data
+    state.step = "first_encounter_question"
 
-# NPC와 대화하며 객관식 퀴즈를 진행하는 함수 (공통 로직)
-def npc_conversation_with_quiz(state, npc):
-    # 1. NPC의 초기 대화 및 퀴즈 출제 (객관식 4지선다)
-    prompt_initial = f"""
+    # 첫 장면 안내
+    desc = story_data.get("world_description", "")
+    obj = story_data.get("objective", "")
+    state.message = (
+        f"게임이 시작되었습니다!\n"
+        f"장소: {state.setting}\n"
+        f"분위기: {state.atmosphere}\n"
+        f"미로 세계 설명: {desc}\n"
+        f"당신의 목표: {obj}\n"
+        "앞으로 나아가시겠습니까?"
+    )
+    return state
+
+
+# ---------- [ 첫 번째 NPC: Question 노드 / Followup 노드 ] ----------
+
+def first_encounter_question(state: MazeState) -> MazeState:
+    """
+    2) 첫 번째 NPC '질문' 노드
+    - NPC가 객관식 퀴즈를 낸다.
+    - 플레이어 답변을 state.player_answer에 저장
+    - 다음 노드: first_encounter_followup
+    """
+    npc = state.story_data["npcs"][0]
+
+    prompt_q = f"""
     당신은 미로 속에서 플레이어가 만나는 NPC '{npc['name']}' (역할: {npc['role']}) 입니다.
-    플레이어와 자연스러운 대화를 시작하며, 현재 미로 세계관과 스토리라인과 관련된 객관식 퀴즈를 출제해 주세요.
-    문제는 4개의 선택지(A, B, C, D)를 포함하고, 대화 형식으로 제시해 주세요.
-    대화의 마지막에는 반드시 "당신의 선택은 무엇입니까?"라는 질문을 던지세요.
+    플레이어와 자연스러운 대화를 시작하며,
+    현재 미로 세계관과 스토리라인과 관련된 객관식 퀴즈를 4지선다(A, B, C, D)로 내주세요.
+    마지막에 "당신의 선택은?"이라고 물어보세요.
     """
-    response_initial = llm.invoke(prompt_initial).content
-    print(response_initial)
-    # 플레이어 입력 받기
+    question_text = llm.invoke(prompt_q).content
+    print(question_text)  # 화면에 출력
+
+    # 플레이어 입력
     player_input = input("> ")
-    state.history.append(f"플레이어: {player_input}")
-    
-    # 2. NPC의 후속 대화: 플레이어의 선택에 따른 피드백 대화 생성
-    prompt_followup = f"""
-    당신은 NPC '{npc['name']}' 입니다.
-    플레이어가 객관식 퀴즈에 대해 '{player_input}'라고 응답했습니다.
-    이 선택이 스토리와 어떻게 연관되는지, 그리고 앞으로의 진행에 어떤 영향을 줄 수 있는지에 대해 자연스러운 대화 형식의 피드백을 작성해 주세요.
+    state.player_answer = player_input.strip()
+    state.step = "first_encounter_followup"
+    # 메시지는 굳이 없어도 되지만, 깔끔히 정리
+    state.message = f"(당신의 답변: {player_input})"
+    return state
+
+def first_encounter_followup(state: MazeState) -> MazeState:
     """
-    response_followup = llm.invoke(prompt_followup).content
-    state.history.append(f"{npc['name']}: {response_followup}")
-    
-    # 두 대화 결과를 합쳐 반환 (출력 시 구분)
-    combined_response = response_initial + "\n" + response_followup
-    return combined_response
+    3) 첫 번째 NPC '후속 대화' 노드
+    - player_answer를 참조하여 후속 대화를 생성
+    - 다음 노드: second_encounter_question
+    """
+    npc = state.story_data["npcs"][0]
+    player_answer = state.player_answer
 
-# 2. 동적으로 생성된 첫 번째 NPC (스토리 초반)
-def first_encounter(state):
-    npc = state.story_data["npcs"][0]  # 첫 번째 NPC 데이터
-    conversation = npc_conversation_with_quiz(state, npc)
-    return {"message": conversation, "next": "second_encounter"}
+    prompt_follow = f"""
+    당신은 NPC '{npc['name']}' 입니다.
+    플레이어가 '{player_answer}' 라고 답했습니다.
+    이 선택이 스토리와 어떻게 연관되는지, 앞으로의 진행에 어떤 영향을 줄 수 있는지
+    자연스럽게 후속 대화를 이어가 주세요.
+    """
+    follow_text = llm.invoke(prompt_follow).content
+    print(follow_text)
 
-# 3. 두 번째 NPC (스토리 중반)
-def second_encounter(state):
-    npc = state.story_data["npcs"][1]  # 두 번째 NPC 데이터
-    conversation = npc_conversation_with_quiz(state, npc)
-    return {"message": conversation, "next": "third_encounter"}
+    # history 추가
+    state.history.append(f"플레이어: {player_answer}")
+    state.history.append(f"{npc['name']}: {follow_text}")
 
-# 4. 세 번째 NPC (스토리 후반)
-def third_encounter(state):
-    npc = state.story_data["npcs"][2]  # 세 번째 NPC 데이터
-    # 이 NPC는 후속 대화에서 플레이어에게 중요한 결정을 유도하는 대사를 포함합니다.
-    prompt_initial = f"""
+    state.step = "second_encounter_question"
+    state.message = "첫 번째 NPC 대화가 완료되었습니다!"
+    return state
+
+
+# ---------- [ 두 번째 NPC: Question / Followup ] ----------
+
+def second_encounter_question(state: MazeState) -> MazeState:
+    npc = state.story_data["npcs"][1]
+
+    prompt_q = f"""
+    당신은 미로 속에서 플레이어가 만나는 NPC '{npc['name']}' (역할: {npc['role']}) 입니다.
+    두 번째 질문을 4지선다로 낸 뒤, 마지막에 "당신의 선택은?"이라고 물어보세요.
+    """
+    question_text = llm.invoke(prompt_q).content
+    print(question_text)
+
+    player_input = input("> ")
+    state.player_answer = player_input.strip()
+    state.step = "second_encounter_followup"
+    state.message = f"(당신의 답변: {player_input})"
+    return state
+
+def second_encounter_followup(state: MazeState) -> MazeState:
+    npc = state.story_data["npcs"][1]
+    player_answer = state.player_answer
+
+    prompt_follow = f"""
+    당신은 NPC '{npc['name']}' 입니다.
+    플레이어가 '{player_answer}' 라고 답했습니다.
+    이 선택이 스토리 전개에 어떤 의미가 있는지,
+    플레이어에게 어떤 힌트를 줄 수 있는지 자연스럽게 설명해 주세요.
+    """
+    follow_text = llm.invoke(prompt_follow).content
+    print(follow_text)
+
+    state.history.append(f"플레이어: {player_answer}")
+    state.history.append(f"{npc['name']}: {follow_text}")
+
+    state.step = "third_encounter_question"
+    state.message = "두 번째 NPC 대화가 완료되었습니다!"
+    return state
+
+
+# ---------- [ 세 번째 NPC: Question / Followup ] ----------
+
+def third_encounter_question(state: MazeState) -> MazeState:
+    npc = state.story_data["npcs"][2]
+
+    prompt_q = f"""
     당신은 미로 속에서 플레이어가 만나는 마지막 NPC '{npc['name']}' (역할: {npc['role']}) 입니다.
-    지금까지의 스토리와 미로 세계관을 종합하여, 플레이어에게 중요한 결정을 내리도록 유도하는 객관식 퀴즈(4지선다)를 포함한 대화를 시작해 주세요.
-    대화의 마지막에는 "당신의 선택은 무엇입니까?"라는 질문을 반드시 던지세요.
+    세 번째 질문(4지선다)과 함께, 마지막에는 "당신의 선택은?"라고 물어보세요.
     """
-    response_initial = llm.invoke(prompt_initial).content
-    print(response_initial)
+    question_text = llm.invoke(prompt_q).content
+    print(question_text)
+
     player_input = input("> ")
-    state.history.append(f"플레이어: {player_input}")
-    
-    prompt_followup = f"""
+    state.player_answer = player_input.strip()
+    state.step = "third_encounter_followup"
+    state.message = f"(당신의 답변: {player_input})"
+    return state
+
+def third_encounter_followup(state: MazeState) -> MazeState:
+    npc = state.story_data["npcs"][2]
+    player_answer = state.player_answer
+
+    prompt_follow = f"""
     당신은 NPC '{npc['name']}' 입니다.
-    플레이어가 '{player_input}'라고 응답했습니다.
-    이 선택이 미로 탈출 혹은 미로의 비밀 탐구와 어떻게 연결되는지에 대해 자연스러운 대화 형식의 피드백을 작성해 주세요.
+    플레이어가 '{player_answer}'라고 답했습니다.
+    이 답변을 바탕으로, 미로의 깊은 비밀과 관련된 마지막 힌트를 주세요.
     """
-    response_followup = llm.invoke(prompt_followup).content
-    state.history.append(f"{npc['name']}: {response_followup}")
-    
-    conversation = response_initial + "\n" + response_followup
-    return {"message": conversation, "next": "final_choice"}
+    follow_text = llm.invoke(prompt_follow).content
+    print(follow_text)
 
-# 5. 최종 선택 (출구 또는 미로에 남기)
-def final_choice(state):
+    state.history.append(f"플레이어: {player_answer}")
+    state.history.append(f"{npc['name']}: {follow_text}")
+
+    state.step = "final_choice_question"
+    state.message = "세 번째 NPC 대화가 완료되었습니다!"
+    return state
+
+# ---------- [ 최종 선택: Question / Followup ] ----------
+
+def final_choice_question(state: MazeState) -> MazeState:
     prompt = f"""
-    미로의 마지막 장소에 도착했습니다. 플레이어는 이제 '{state.story_data['objective']}'을(를) 손에 넣을 수 있습니다.
-    
-    하지만 이 순간, 중요한 선택이 필요합니다.
-    1. '{state.story_data['objective']}'을(를) 가지고 미로에서 탈출한다.
-    2. 미로에 남아 이곳의 진실을 더 깊이 탐구한다.
-    
-    이 선택에 대해 객관식 퀴즈 형식의 질문과 4개의 선택지를 포함하여 플레이어에게 대화 형식으로 제시해 주세요.
+    미로의 마지막 장소에 도착했습니다.
+    당신의 목표는 '{state.story_data.get('objective', '???')}' 입니다.
+
+    이제 중요한 선택이 필요합니다.
+    1) 미로에서 탈출하여 목표를 달성한다.
+    2) 미로에 남아서 더 깊이 탐구한다.
+    3) 다른 길을 찾아 또 다른 보물을 노린다.
+    4) ??? (자유롭게 추가 가능)
+
+    어떤 선택을 하시겠습니까? (1/2/3/4)
     """
-    response = llm.invoke(prompt).content
-    print(response)
+    print(prompt)
     player_input = input("> ")
-    state.history.append(f"플레이어: {player_input}")
-    
-    # 플레이어의 선택에 따른 후속 피드백 생성
-    prompt_followup = f"""
-    당신은 게임의 내레이터 역할을 맡은 NPC입니다.
-    플레이어가 '{player_input}'라고 선택했습니다.
-    이 선택이 미로 탈출에 미치는 영향을 스토리와 연계하여 자연스러운 대화 형식으로 설명해 주세요.
+    state.player_answer = player_input.strip()
+    state.step = "final_choice_followup"
+    state.message = f"(당신의 최종 선택: {player_input})"
+    return state
+
+def final_choice_followup(state: MazeState) -> MazeState:
+    player_answer = state.player_answer
+    prompt_follow = f"""
+    당신은 게임의 내레이터 역할입니다.
+    플레이어가 '{player_answer}'를 선택했습니다.
+    이 선택이 미로 탈출에 어떤 영향을 미치고, 스토리가 어떻게 마무리될지
+    자연스럽게 설명해 주세요.
     """
-    response_followup = llm.invoke(prompt_followup).content
-    state.history.append(f"내레이터: {response_followup}")
-    
-    combined_response = response + "\n" + response_followup
-    return {"message": combined_response, "next": "end"}
+    response_follow = llm.invoke(prompt_follow).content
+    print(response_follow)
 
-# 6. 결말 (플레이어의 선택에 따라 다름)
-def end_game(state):
-    if any("탈출" in entry for entry in state.history):
-        ending = f"당신은 '{state.story_data['objective']}'을(를) 손에 넣고 미로를 빠져나왔습니다.\n"\
-                 f"그러나 현실에 돌아온 후, 미로의 기억은 희미해져 갑니다...\n"\
-                 "가끔 꿈속에서 미로의 목소리가 들려옵니다."
+    state.history.append(f"플레이어: {player_answer}")
+    state.history.append(f"내레이터: {response_follow}")
+
+    state.step = "end"
+    state.message = "최종 선택에 대한 내레이터의 대화가 끝났습니다."
+    return state
+
+# ---------- [ 결말 ] ----------
+def end_game(state: MazeState) -> MazeState:
+    """
+    'end' 노드
+    - 플레이어의 선택/역사에 따라 결말을 출력
+    - 여기서는 '탈출'이라는 단어가 들어있는지 여부로 분기
+    """
+    if any("탈출" in h for h in state.history):
+        ending = f"당신은 '{state.story_data.get('objective','???')}'을(를) 손에 넣고 미로를 빠져나왔습니다.\n" \
+                 "현실로 돌아왔지만, 미로의 기억은 서서히 희미해집니다.\n" \
+                 "가끔 꿈속에서 이곳의 환영이 떠오릅니다..."
     else:
-        ending = f"당신은 '{state.story_data['objective']}'을(를) 뒤로 하고 미로에 남았습니다.\n"\
-                 f"여기에는 아직 밝혀지지 않은 더 깊은 비밀이 숨어 있을 것입니다...\n"\
-                 "이제 당신은 이 미로의 일부가 되었습니다."
-    return {"message": ending, "next": None}
+        ending = f"당신은 미로에 남아 '{state.story_data.get('objective','???')}'의 비밀을 더 파고들기 시작했습니다.\n" \
+                 "아직 밝혀지지 않은 무언가가, 이 미로 어딘가에서 당신을 기다립니다...\n" \
+                 "이제 당신은 이곳의 일부가 되었습니다."
 
-# LangGraph를 활용한 스토리 그래프 구축
-story_graph = StateGraph(GameState)
+    print("\n--- 결말 ---")
+    print(ending)
+
+    state.message = "게임이 종료되었습니다. 감사합니다!"
+    return state
+
+# -------------------------
+# 4) 그래프 구성
+# -------------------------
+story_graph = StateGraph(MazeState)
 
 story_graph.add_node("start", generate_story)
-story_graph.add_node("first_encounter", first_encounter)
-story_graph.add_node("second_encounter", second_encounter)
-story_graph.add_node("third_encounter", third_encounter)
-story_graph.add_node("final_choice", final_choice)
+
+story_graph.add_node("first_encounter_question", first_encounter_question)
+story_graph.add_node("first_encounter_followup", first_encounter_followup)
+
+story_graph.add_node("second_encounter_question", second_encounter_question)
+story_graph.add_node("second_encounter_followup", second_encounter_followup)
+
+story_graph.add_node("third_encounter_question", third_encounter_question)
+story_graph.add_node("third_encounter_followup", third_encounter_followup)
+
+story_graph.add_node("final_choice_question", final_choice_question)
+story_graph.add_node("final_choice_followup", final_choice_followup)
+
 story_graph.add_node("end", end_game)
 
-# 연결 설정 (스토리 진행 흐름)
 story_graph.set_entry_point("start")
-story_graph.add_edge("start", "first_encounter")
-story_graph.add_edge("first_encounter", "second_encounter")
-story_graph.add_edge("second_encounter", "third_encounter")
-story_graph.add_edge("third_encounter", "final_choice")
-story_graph.add_edge("final_choice", "end")
 
-# 게임 실행
-setting = input("미로의 장소를 입력하세요 (예: '으슥한 덩굴 미로'):\n> ")
-atmosphere = input("미로의 분위기를 입력하세요 (예: '해리포터 같은 어두운 판타지'):\n> ")
+# 흐름 연결
+story_graph.add_edge("start", "first_encounter_question")
+story_graph.add_edge("first_encounter_question", "first_encounter_followup")
+story_graph.add_edge("first_encounter_followup", "second_encounter_question")
+story_graph.add_edge("second_encounter_question", "second_encounter_followup")
+story_graph.add_edge("second_encounter_followup", "third_encounter_question")
+story_graph.add_edge("third_encounter_question", "third_encounter_followup")
+story_graph.add_edge("third_encounter_followup", "final_choice_question")
+story_graph.add_edge("final_choice_question", "final_choice_followup")
+story_graph.add_edge("final_choice_followup", "end")
 
-state = GameState(setting, atmosphere)
 game_runner = story_graph.compile()
 
-while state.step != "end":
-    result = game_runner.invoke(state)
-    print("\n" + result["message"])
-    # 플레이어의 입력은 각 노드 내에서 이미 처리되고, state.history에 기록됩니다.
-    state.step = result["next"]
+# -------------------------
+# 5) 실제 실행 흐름
+# -------------------------
+def main():
+    setting = input("미로의 장소를 입력하세요 (예: '으슥한 덩굴 미로'):\n> ")
+    atmosphere = input("미로의 분위기를 입력하세요 (예: '해리포터 같은 어두운 판타지'):\n> ")
 
-# 마지막 결말 출력
-final = game_runner.invoke(state)
-print("\n" + final["message"])
+    # Pydantic 모델 생성
+    state = MazeState(setting=setting, atmosphere=atmosphere)
+
+    while True:
+        # AddableValuesDict → MazeState 변환
+        raw_data = game_runner.invoke(state)
+        state = MazeState.model_validate(raw_data)
+
+        # 'end' 단계면 종료
+        if state.step == "end":
+            break
+
+        # 메시지 출력(필요 시)
+        if state.message:
+            print("\n[System Message] " + state.message)
+
+    # 마지막 end 노드 (결말)
+    raw_data = game_runner.invoke(state)
+    state = MazeState.model_validate(raw_data)
+    print("\n[System Message] " + state.message)
+
+if __name__ == "__main__":
+    main()
