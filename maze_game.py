@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 
+import time
 import json
 from typing import List, Optional
 
@@ -48,28 +49,29 @@ memory = ConversationBufferMemory(return_messages=True)
 # -------------------------
 
 def generate_story(state: MazeState) -> MazeState:
-    """
-    1) start 노드
-    - 장소/분위기 정보를 바탕으로, 세계관/목표/NPC들을 JSON 형식으로 생성.
-    - 그 내용을 state.story_data에 저장
-    - 다음 노드: first_encounter_question
-    """
     prompt = f"""
-    당신은 텍스트 기반 미로 탐험 게임의 스토리 마스터입니다.
+    게임 개요: 사용자가 설정한 장소와 분위기 기반으로 AI가 미로와 스토리를 생성하며, 목적은 미로 탈출. NPC와의 상호작용이 중요한 요소.
     플레이어가 미로의 장소로 '{state.setting}', 분위기로 '{state.atmosphere}'를 입력했습니다.
 
-    이 설정을 기반으로 흥미로운 미로 탐험 스토리를 만들어 주세요.
-
-    출력은 반드시 **순수 JSON** 형태여야 합니다. (추가 설명 X)
-    예시:
+    무조건 위 게임 개요와 사용자가 입력한 설정을 바탕으로 방탈출게임 느낌의 스토리와 세계관을 만들어줘
+    셰계관을 만들고 아래 예시처럼 JSON으로 출력해야 해.
+    조건 : 출력은 반드시 순수 JSON 형태여야 하고, 삼중 백틱(```)이나 다른 코드 블록 문법은 절대 사용하지 마.
+    예시 :
     {{
-      "world_description": "string",
-      "objective": "string",
-      "npcs": [
-        {{"name": "string", "role": "string"}},
-        ...
-      ]
+        "world_description": "세계관 및 스토리 전체 설명!!, 실제 플레이어한테 게임 관리자가 설명하듯이 해줘.존댓말로 해줘",
+        "objective": "미로탈출 게임의 세계관 기반 궁극적 목표, 이것도 플레이어한테 게임 관리자가 설명하듯이 존댓말로 해줘",
+        "story_details": {{
+            "intro": "게임 시작 시의 스토리와 상황 설명을 게임 관리자가 플레이어한테 소설의 첫 부분에서 이야기하듯이 존댓말로 작성, ",
+            "middle": "게임 진행 중 발생하는 주요 사건 및 전개를 게임 관리자가 플레이어한테 소설의 첫 부분에서 이야기하듯이 존댓말로 작성",
+            "final": "게임 결말에 이르는 과정과 결말의 분위기를 게임 관리자가 플레이어한테 소설의 첫 부분에서 이야기하듯이 존댓말로 작성"
+        }},
+        "npcs": [
+            {{"name": "NPC 이름", "role": "NPC 역할", "personality": "특징 및 말투"}}
+            // 추가 NPC 정보
+        ]
     }}
+
+    위 예시를 무조건 지켜.
     """
     response = llm.invoke(prompt).content
     try:
@@ -84,63 +86,55 @@ def generate_story(state: MazeState) -> MazeState:
 
     # 첫 장면 안내
     desc = story_data.get("world_description", "")
+    overview = story_data.get("story_details", {}).get("intro", "")
     obj = story_data.get("objective", "")
-    state.message = (
-        f"게임이 시작되었습니다!\n"
-        f"장소: {state.setting}\n"
-        f"분위기: {state.atmosphere}\n"
-        f"미로 세계 설명: {desc}\n"
-        f"당신의 목표: {obj}\n"
-        "앞으로 나아가시겠습니까?"
-    )
+
+    print(overview)
+    time.sleep(1)
+    print(obj)
+    print("행운을 빕니다!\n")
+
     return state
 
 
 # ---------- [ 첫 번째 NPC: Question 노드 / Followup 노드 ] ----------
 
 def first_encounter_question(state: MazeState) -> MazeState:
-    """
-    2) 첫 번째 NPC '질문' 노드
-    - NPC가 객관식 퀴즈를 낸다.
-    - 플레이어 답변을 state.player_answer에 저장
-    - 다음 노드: first_encounter_followup
-    """
     npc = state.story_data["npcs"][0]
+    intro_story = state.story_data.get("story_details", {}).get("intro", "")
 
     prompt_q = f"""
-    당신은 미로 속에서 플레이어가 만나는 NPC '{npc['name']}' (역할: {npc['role']}) 입니다.
-    플레이어와 자연스러운 대화를 시작하며,
-    현재 미로 세계관과 스토리라인과 관련된 객관식 퀴즈를 4지선다(A, B, C, D)로 내주세요.
-    마지막에 "당신의 선택은?"이라고 물어보세요.
+    당신은 이 미로 속에서 플레이어가 만나는 첫 NPC '{npc['name']}' (역할: {npc['role']}) 입니다.
+    - 말투: {npc.get('personality')}
+    플레이어와 자연스러운 대화를 해당 말투로 시작하되, 방금까지의 {intro_story}와 유사한 스토리를 처음에 무조건 언급하며 이어가세요.
+    그리고 게임 진행과는 관계없지만 분위기는 관계있는 3지선다 질문을 1개 내줘
+    퀴즈 내용은 흥미로워야 해
     """
     question_text = llm.invoke(prompt_q).content
     print(question_text)  # 화면에 출력
+    time.sleep(1)
 
     # 플레이어 입력
     player_input = input("> ")
     state.player_answer = player_input.strip()
     state.step = "first_encounter_followup"
     # 메시지는 굳이 없어도 되지만, 깔끔히 정리
-    state.message = f"(당신의 답변: {player_input})"
+    state.message = f"(답변: {player_input})"
     return state
 
 def first_encounter_followup(state: MazeState) -> MazeState:
-    """
-    3) 첫 번째 NPC '후속 대화' 노드
-    - player_answer를 참조하여 후속 대화를 생성
-    - 다음 노드: second_encounter_question
-    """
     npc = state.story_data["npcs"][0]
     player_answer = state.player_answer
 
     prompt_follow = f"""
     당신은 NPC '{npc['name']}' 입니다.
     플레이어가 '{player_answer}' 라고 답했습니다.
-    이 선택이 스토리와 어떻게 연관되는지, 앞으로의 진행에 어떤 영향을 줄 수 있는지
-    자연스럽게 후속 대화를 이어가 주세요.
+    이 선택이 정답이면 정답이라고 말하고, 미로 진행에 필요한 힌트를 하나 주고 대화를 끝내 주세요.
+    선택이 틀리면 틀렸다고 말하고 힌트를 주지 마. 말투는 해당 npc 말투 그대로 해줘
     """
     follow_text = llm.invoke(prompt_follow).content
     print(follow_text)
+    time.sleep(1)
 
     # history 추가
     state.history.append(f"플레이어: {player_answer}")
@@ -155,13 +149,18 @@ def first_encounter_followup(state: MazeState) -> MazeState:
 
 def second_encounter_question(state: MazeState) -> MazeState:
     npc = state.story_data["npcs"][1]
+    middle_story = state.story_data.get("story_details", {}).get("middle", "")
 
     prompt_q = f"""
-    당신은 미로 속에서 플레이어가 만나는 NPC '{npc['name']}' (역할: {npc['role']}) 입니다.
-    두 번째 질문을 4지선다로 낸 뒤, 마지막에 "당신의 선택은?"이라고 물어보세요.
+    당신은 이 미로 속에서 플레이어가 만나는 두번째 NPC '{npc['name']}' (역할: {npc['role']}) 입니다.
+    - 말투: {npc.get('personality')}
+    플레이어와 자연스러운 대화를 해당 말투로 시작하되, 방금까지의 {middle_story}와 유사한 스토리를 처음에 무조건 언급하며 이어가세요.
+    그리고 게임 진행과는 관계없지만 분위기는 관계있는 3지선다 질문을 1개 내줘
+    퀴즈 내용은 흥미로워야 해
     """
     question_text = llm.invoke(prompt_q).content
     print(question_text)
+    time.sleep(1)
 
     player_input = input("> ")
     state.player_answer = player_input.strip()
@@ -176,11 +175,12 @@ def second_encounter_followup(state: MazeState) -> MazeState:
     prompt_follow = f"""
     당신은 NPC '{npc['name']}' 입니다.
     플레이어가 '{player_answer}' 라고 답했습니다.
-    이 선택이 스토리 전개에 어떤 의미가 있는지,
-    플레이어에게 어떤 힌트를 줄 수 있는지 자연스럽게 설명해 주세요.
+    이 선택이 정답이면 정답이라고 말하고, 미로 진행에 필요한 힌트를 하나 주고 대화를 끝내 주세요.
+    선택이 틀리면 틀렸다고 말하고 힌트를 주지 마. 말투는 해당 npc 말투 그대로 해줘
     """
     follow_text = llm.invoke(prompt_follow).content
     print(follow_text)
+    time.sleep(1)
 
     state.history.append(f"플레이어: {player_answer}")
     state.history.append(f"{npc['name']}: {follow_text}")
@@ -194,13 +194,17 @@ def second_encounter_followup(state: MazeState) -> MazeState:
 
 def third_encounter_question(state: MazeState) -> MazeState:
     npc = state.story_data["npcs"][2]
-
+    final_story = state.story_data.get("story_details", {}).get("final", "")
     prompt_q = f"""
-    당신은 미로 속에서 플레이어가 만나는 마지막 NPC '{npc['name']}' (역할: {npc['role']}) 입니다.
-    세 번째 질문(4지선다)과 함께, 마지막에는 "당신의 선택은?"라고 물어보세요.
+    당신은 이 미로 속에서 플레이어가 만나는 두번째 NPC '{npc['name']}' (역할: {npc['role']}) 입니다.
+    - 말투: {npc.get('personality')}
+    플레이어와 자연스러운 대화를 해당 말투로 시작하되, 방금까지의 {final_story}와 유사한 스토리를 처음에 무조건 언급하며 이어가세요.
+    그리고 게임 진행과는 관계없지만 분위기는 관계있는 3지선다 질문을 1개 내줘
+    퀴즈 내용은 흥미로워야 해
     """
     question_text = llm.invoke(prompt_q).content
     print(question_text)
+    time.sleep(1)
 
     player_input = input("> ")
     state.player_answer = player_input.strip()
@@ -214,11 +218,13 @@ def third_encounter_followup(state: MazeState) -> MazeState:
 
     prompt_follow = f"""
     당신은 NPC '{npc['name']}' 입니다.
-    플레이어가 '{player_answer}'라고 답했습니다.
-    이 답변을 바탕으로, 미로의 깊은 비밀과 관련된 마지막 힌트를 주세요.
+    플레이어가 '{player_answer}' 라고 답했습니다.
+    이 선택이 정답이면 정답이라고 말하고, 미로 진행에 필요한 힌트를 하나 주고 대화를 끝내 주세요.
+    선택이 틀리면 틀렸다고 말하고 힌트를 주지 마. 말투는 해당 npc 말투 그대로 해줘
     """
     follow_text = llm.invoke(prompt_follow).content
     print(follow_text)
+    time.sleep(1)
 
     state.history.append(f"플레이어: {player_answer}")
     state.history.append(f"{npc['name']}: {follow_text}")
@@ -232,17 +238,15 @@ def third_encounter_followup(state: MazeState) -> MazeState:
 def final_choice_question(state: MazeState) -> MazeState:
     prompt = f"""
     미로의 마지막 장소에 도착했습니다.
-    당신의 목표는 '{state.story_data.get('objective', '???')}' 입니다.
-
     이제 중요한 선택이 필요합니다.
     1) 미로에서 탈출하여 목표를 달성한다.
     2) 미로에 남아서 더 깊이 탐구한다.
-    3) 다른 길을 찾아 또 다른 보물을 노린다.
-    4) ??? (자유롭게 추가 가능)
 
-    어떤 선택을 하시겠습니까? (1/2/3/4)
+
+    어떤 선택을 하시겠습니까? (1/2/)
     """
     print(prompt)
+    time.sleep(1)
     player_input = input("> ")
     state.player_answer = player_input.strip()
     state.step = "final_choice_followup"
@@ -259,6 +263,7 @@ def final_choice_followup(state: MazeState) -> MazeState:
     """
     response_follow = llm.invoke(prompt_follow).content
     print(response_follow)
+    time.sleep(1)
 
     state.history.append(f"플레이어: {player_answer}")
     state.history.append(f"내레이터: {response_follow}")
@@ -285,6 +290,7 @@ def end_game(state: MazeState) -> MazeState:
 
     print("\n--- 결말 ---")
     print(ending)
+    time.sleep(1)
 
     state.message = "게임이 종료되었습니다. 감사합니다!"
     return state
@@ -329,8 +335,8 @@ game_runner = story_graph.compile()
 # 5) 실제 실행 흐름
 # -------------------------
 def main():
-    setting = input("미로의 장소를 입력하세요 (예: '으슥한 덩굴 미로'):\n> ")
-    atmosphere = input("미로의 분위기를 입력하세요 (예: '해리포터 같은 어두운 판타지'):\n> ")
+    setting = input("미로의 장소를 입력하세요 (예: '고대 성 지하 동굴'):\n> ")
+    atmosphere = input("미로의 분위기를 입력하세요 (예: '어둡고 신비로움'):\n> ")
 
     # Pydantic 모델 생성
     state = MazeState(setting=setting, atmosphere=atmosphere)
@@ -347,6 +353,7 @@ def main():
         # 메시지 출력(필요 시)
         if state.message:
             print("\n[System Message] " + state.message)
+            time.sleep(1)
 
     # 마지막 end 노드 (결말)
     raw_data = game_runner.invoke(state)
