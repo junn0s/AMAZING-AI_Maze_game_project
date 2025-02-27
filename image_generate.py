@@ -7,8 +7,9 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 def generate_image(prompt: str, n: int = 1, size: str = "1024x1024") -> str:
     try:
         # 이미지 생성 요청
-        response = openai.Image.create(
-            prompt=prompt,
+        response = openai.images.generate(
+            model = "dall-e-3",
+            prompt = prompt,
             n=n,
             size=size
         )
