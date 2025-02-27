@@ -1,12 +1,6 @@
 #!/bin/bash
 cd /home/ubuntu/maze-game
 
-# 프로젝트 폴더가 없으면 생성
-if [ ! -d "/home/ubuntu/maze-game" ]; then
-    mkdir -p /home/ubuntu/maze-game
-    sudo chown -R ubuntu:ubuntu /home/ubuntu/maze-game
-fi
-
 # 기존 가상환경이 있으면 삭제
 if [ -d "venv" ]; then
     sudo rm -rf venv
