@@ -1,10 +1,6 @@
 #!/bin/bash
+sudo find /home/ubuntu/maze-game/ -mindepth 1 ! -name 'server.log' -exec rm -rf {} +
 cd /home/ubuntu/maze-game
-
-# 기존 가상환경이 있으면 삭제
-if [ -d "venv" ]; then
-    sudo rm -rf venv
-fi
 
 # 새로운 가상환경 생성
 python3 -m venv venv
