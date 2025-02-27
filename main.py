@@ -9,7 +9,7 @@ from typing import Optional, List
 from llm_langchain import MazeState, advance_game
 from image_generate import generate_image
 
-app = FastAPI()
+app = FastAPI() 
 
 app.add_middleware(
     CORSMiddleware,

@@ -6,4 +6,4 @@ python-dotenv
 langchain
 langchain-community
 langgraph
-openai
+openai==0.28
