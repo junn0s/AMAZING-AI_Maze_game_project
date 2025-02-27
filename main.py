@@ -5,7 +5,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
 
-from maze_game import MazeState, advance_game
+from llm_langchain import MazeState, advance_game
 
 app = FastAPI()
 
