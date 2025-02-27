@@ -2,6 +2,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import json
+import re
 from typing import List, Optional
 
 # (Deprecation 경고를 없애려면):
@@ -21,7 +22,7 @@ from pydantic import BaseModel, Field
 class MazeState(BaseModel):
     setting: str
     atmosphere: str
-    num: int
+    num: str
     name : str
 
     step: str = "start"
@@ -44,8 +45,15 @@ llm = ChatOpenAI(
 memory = ConversationBufferMemory(return_messages=True)
 
 # -------------------------
-# 3) 노드 함수들
+# 3) 함수들
 # -------------------------
+
+def clean_response(text: str) -> str:
+    # 코드 블록 제거
+    text = re.sub(r"^```(?:json)?\s*", "", text)
+    text = re.sub(r"\s*```$", "", text)
+    return text.strip()
+
 
 def generate_story(state: MazeState, name:str, setting:str, atmosphere:str) -> MazeState:
     state.setting = setting
@@ -57,7 +65,7 @@ def generate_story(state: MazeState, name:str, setting:str, atmosphere:str) -> M
     플레이어가 미로의 장소로 '{state.setting}', 분위기로 '{state.atmosphere}'를 입력했습니다.
     플레이어의 이름은 {state.name} 입니다.
 
-    무조건 위 게임 개요와 사용자가 입력한 설정을 바탕으로 방탈출게임 느낌의 스토리와 세계관을 만들어줘
+    무조건 위 게임 개요와 사용자가 입력한 설정을 바탕으로 방탈출게임 느낌의 스토리와 세계관을 만들어줘. 그리고 npc 3명 만들어줘.
     셰계관을 만들고 아래 예시와 똑같이 JSON으로 출력해야 해. 그리고 삼중 백틱(```)이나 다른 코드 블록 문법은 절대 사용하지 마.
     예시 :
     {{
@@ -72,15 +80,16 @@ def generate_story(state: MazeState, name:str, setting:str, atmosphere:str) -> M
         }},
         "npcs": [
             {{"name": "NPC 이름", "role": "NPC 역할", "personality": "특징 및 말투"}}
-            // 추가 NPC 정보
+            // 추가 NPC 정보(3명)
         ]
     }}
 
     위 예시를 무조건 지켜. 부탁할게
     """
     response = llm.invoke(prompt).content
+    cleaned_response = clean_response(response)
     try:
-        story_data = json.loads(response)
+        story_data = json.loads(cleaned_response)
     except json.JSONDecodeError:
         state.message = "생성에 실패했습니다."
         raise ValueError("Invalid JSON from LLM response")
@@ -109,7 +118,7 @@ def first_encounter_question(state: MazeState) -> MazeState:
     해당 세계관과 이어지며 정답이 객관적으로 확실한 3지선다 퀴즈를 1개 내주세요
     틀리면 패널티가 있다는 말을 추가해주세요
     """
-    question_text = llm.invoke(prompt_q)
+    question_text = llm.invoke(prompt_q).content
     state.message = question_text
     state.history.append(f"{npc['name']}: {question_text}")
     state.step = "first_encounter_followup"
@@ -121,31 +130,31 @@ def first_encounter_followup(state: MazeState, player_input:str) -> MazeState:
     npc = state.story_data["npcs"][0]
     player_answer = state.player_answer
     full_story = state.story_data.get("world_description", "")
-    message = state.message
+    message = state.message.replace("{", "{{").replace("}", "}}")
 
     prompt_follow = f"""
     당신은 NPC '{npc['name']}' 입니다. 당신의 말투는 : {npc.get('personality')} 입니다.
     플레이어가 '{player_answer}' 라고 답했습니다.
-    이 선택이 {message}에서의 퀴즈 정답이면 정답이라고 말하고, 퀴즈 내용과 이어지며 미로 진행에 필요한 힌트를 하나 주고 대화를 끝내 주세요.
-    선택이 틀리면 틀렸다고 말하고, 퀴즈 내용과 이어지게 말만 하고 힌트는 주지 마시고 대화를 끝내세요
 
     필수 조건 : 
-    - **위 내용을 반드시 순수한 JSON 형식으로만 출력하세요**
+    - **위 내용을 반드시 아래 예시와 동일한 순수한 JSON 형식으로만 출력하세요**
+    - 그리고 삼중 백틱(```)이나 다른 코드 블록 문법은 절대 사용하지 마.
     - 전체 맥락은 무조건 {full_story} 내에서 진행되어야 합니다
-    - 퀴즈 정답이 맞으면 0, 틀리면 1의 값을 아래 JSON에 answer에 줘야 합니다
-    - 나머지 전체 대화는 아래 JSON에 message에 줘야 합니다
 
     예시:
     {{
-        "message": "나머지 전체 대화",
-        "num": "퀴즈를 맞으면 0, 틀리면 1, 숫자만 출력"
+        "message": "이 선택이 {message}에서의 퀴즈 정답이면 정답이라고 말하고, 퀴즈 내용과 이어지며 미로 진행에 필요한 힌트를 하나 주고 대화를 끝내 주세요.
+                   선택이 틀리면 틀렸다고 말하고, 퀴즈 내용과 이어지게 말만 하고 힌트는 주지 마시고 대화를 끝내세요",
+        "answer":  "퀴즈를 맞으면 0, 틀리면 1을 문자열로 출력"
     }}    
     """
     follow_text = llm.invoke(prompt_follow).content
+    cleaned_response = clean_response(follow_text)
+
     try:
-        data = json.loads(follow_text)
+        data = json.loads(cleaned_response)
         state.message = data["message"]
-        state.num = data["num"]
+        state.num = data["answer"]
     except json.JSONDecodeError:
         state.message = "퀴즈 생성에 실패했습니다. 다시 시도해주세요"
     # history 추가
@@ -160,7 +169,7 @@ def first_encounter_followup(state: MazeState, player_input:str) -> MazeState:
 def second_encounter_question(state: MazeState) -> MazeState:
     npc = state.story_data["npcs"][1]
     middle_story = state.story_data.get("story_details", {}).get("middle", "")
-    history = state.history
+    history = "\n".join(state.history[-10:])
     full_story = state.story_data.get("world_description", "")
 
     prompt_q = f"""
@@ -184,31 +193,30 @@ def second_encounter_followup(state: MazeState, player_input:str) -> MazeState:
     npc = state.story_data["npcs"][1]
     player_answer = state.player_answer
     full_story = state.story_data.get("world_description", "")
-    message = state.message
+    message = state.message.replace("{", "{{").replace("}", "}}")
 
     prompt_follow = f"""
     당신은 두 번째 NPC '{npc['name']}' 입니다. 당신의 말투는 : {npc.get('personality')} 입니다.
     플레이어가 '{player_answer}' 라고 답했습니다.
-    이 선택이 {message}에서의 퀴즈 정답이면 정답이라고 말하고, 퀴즈 내용과 이어지며 미로 진행에 필요한 힌트를 하나 주고 대화를 끝내 주세요.
-    선택이 틀리면 틀렸다고 말하고, 퀴즈 내용과 이어지게 말만 하고 힌트는 주지 마시고 대화를 끝내세요
 
     필수 조건 : 
-    - **위 내용을 반드시 순수한 JSON 형식으로만 출력하세요**
+    - **위 내용을 반드시 아래 예시와 동일한 순수한 JSON 형식으로만 출력하세요**
+    - 그리고 삼중 백틱(```)이나 다른 코드 블록 문법은 절대 사용하지 마.
     - 전체 맥락은 무조건 {full_story} 내에서 진행되어야 합니다
-    - 퀴즈 정답이 맞으면 0, 틀리면 1의 값을 아래 JSON에 answer에 줘야 합니다
-    - 나머지 전체 대화는 아래 JSON에 message에 줘야 합니다
 
     예시:
     {{
-        "message": "나머지 전체 대화",
-        "num": "퀴즈를 맞으면 0, 틀리면 1, 숫자만 출력"
+        "message": "이 선택이 {message}에서의 퀴즈 정답이면 정답이라고 말하고, 퀴즈 내용과 이어지며 미로 진행에 필요한 힌트를 하나 주고 대화를 끝내 주세요.
+                   선택이 틀리면 틀렸다고 말하고, 퀴즈 내용과 이어지게 말만 하고 힌트는 주지 마시고 대화를 끝내세요",
+        "answer":  "퀴즈를 맞으면 0, 틀리면 1을 문자열로 출력"
     }}  
     """
     follow_text = llm.invoke(prompt_follow).content
+    cleaned_response = clean_response(follow_text)
     try:
-        data = json.loads(follow_text)
+        data = json.loads(cleaned_response)
         state.message = data["message"]
-        state.num = data["num"]
+        state.num = data["answer"]
     except json.JSONDecodeError:
         state.message = "퀴즈 생성에 실패했습니다. 다시 시도해주세요"
 
@@ -223,7 +231,7 @@ def second_encounter_followup(state: MazeState, player_input:str) -> MazeState:
 def third_encounter_question(state: MazeState) -> MazeState:
     npc = state.story_data["npcs"][2]
     final_story = state.story_data.get("story_details", {}).get("final", "")
-    history = state.history
+    history = "\n".join(state.history[-10:])
     full_story = state.story_data.get("world_description", "")
 
     prompt_q = f"""
@@ -247,37 +255,36 @@ def third_encounter_followup(state: MazeState, player_input:str) -> MazeState:
     npc = state.story_data["npcs"][2]
     player_answer = state.player_answer
     full_story = state.story_data.get("world_description", "")
-    message = state.message
+    message = state.message.replace("{", "{{").replace("}", "}}")
 
     prompt_follow = f"""
     당신은 세 번째 NPC '{npc['name']}' 입니다. 당신의 말투는 : {npc.get('personality')} 입니다.
     플레이어가 '{player_answer}' 라고 답했습니다.
-    이 선택이 {message}에서의 퀴즈 정답이면 정답이라고 말하고, 퀴즈 내용과 이어지며 미로 진행에 필요한 힌트를 하나 주고 대화를 끝내 주세요.
-    선택이 틀리면 틀렸다고 말하고, 퀴즈 내용과 이어지게 말만 하고 힌트는 주지 마시고 대화를 끝내세요
 
     필수 조건 : 
-    - **위 내용을 반드시 순수한 JSON 형식으로만 출력하세요**
+    - **위 내용을 반드시 아래 예시와 동일한 순수한 JSON 형식으로만 출력하세요**
+    - 그리고 삼중 백틱(```)이나 다른 코드 블록 문법은 절대 사용하지 마.
     - 전체 맥락은 무조건 {full_story} 내에서 진행되어야 합니다
-    - 퀴즈 정답이 맞으면 0, 틀리면 1의 값을 아래 JSON에 answer에 줘야 합니다
-    - 나머지 전체 대화는 아래 JSON에 message에 줘야 합니다
 
     예시:
     {{
-        "message": "나머지 전체 대화",
-        "num": "퀴즈를 맞으면 0, 틀리면 1, 숫자만 출력"
-    }}  
+        "message": "이 선택이 {message}에서의 퀴즈 정답이면 정답이라고 말하고, 퀴즈 내용과 이어지며 미로 진행에 필요한 힌트를 하나 주고 대화를 끝내 주세요.
+                   선택이 틀리면 틀렸다고 말하고, 퀴즈 내용과 이어지게 말만 하고 힌트는 주지 마시고 대화를 끝내세요",
+        "answer":  "퀴즈를 맞으면 0, 틀리면 1을 문자열로 출력"
+    }}   
     """
     follow_text = llm.invoke(prompt_follow).content
+    cleaned_response = clean_response(follow_text)
     try:
-        data = json.loads(follow_text)
+        data = json.loads(cleaned_response)
         state.message = data["message"]
-        state.num = data["num"]
+        state.num = data["answer"]
     except json.JSONDecodeError:
         state.message = "퀴즈 생성에 실패했습니다. 다시 시도해주세요"
     # history 추가
     state.history.append(f"플레이어: {player_answer}")
     state.history.append(f"{npc['name']}: {follow_text}")
-    state.step = "final_choice_question"
+    state.step = "end_game"
     return state
 
 
