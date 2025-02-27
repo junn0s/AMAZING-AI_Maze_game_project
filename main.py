@@ -112,7 +112,6 @@ def start_game(req: StartRequest):
     )
     image_url = generate_image(image_prompt, size="1024x1024")
 
-
     return StartResponse(
         worldDescription = game_state.message,
         image = image_url
