@@ -1,6 +1,9 @@
 #!/bin/bash
 cd /home/ubuntu/maze-game
 
+sudo chown -R ubuntu:ubuntu /home/ubuntu/maze-game
+sudo chmod -R 775 /home/ubuntu/maze-game
+
 # 새로운 가상환경 생성
 python3 -m venv venv
 
