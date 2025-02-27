@@ -1,8 +1,16 @@
 #!/bin/bash
-cd /home/ubuntu/maze-game
+# 기존 가상환경이 있으면 삭제
+if [ -d "venv" ]; then
+    sudo rm -rf venv
+fi
 
-# Python 가상환경 생성 및 활성화
+# 새로운 가상환경 생성
 python3 -m venv venv
+
+# 권한 수정 (ubuntu 계정이 접근 가능하도록 설정)
+sudo chown -R ubuntu:ubuntu venv
+
+# 가상환경 활성화
 source venv/bin/activate
 
 # 의존성 설치
