@@ -1,4 +1,6 @@
 #!/bin/bash
+cd /home/ubuntu/maze-game
+
 # 기존 가상환경이 있으면 삭제
 if [ -d "venv" ]; then
     sudo rm -rf venv
