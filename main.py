@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
 
-from maze_game import MazeState, advance_game
+from llm_langchain import MazeState, advance_game
 from image_generate import generate_image
 
 app = FastAPI()
@@ -108,11 +108,9 @@ def start_game(req: StartRequest):
     game_state = advance_game(game_state)
 
     image_prompt = (
-        f"The setting is {req.location} and the mood is {req.mood}. "
-        "Generate a pixel art style background image reminiscent of retro 8-bit video games, "
-        "with vibrant colors and a low-resolution look."
+        f"The location is {req.location} and the mood is {req.mood}. Create a pixel-style image related to this location and mood."
     )
-    image_url = generate_image(image_prompt, size="512x512")
+    image_url = generate_image(image_prompt, size="1024x1024")
 
 
     return StartResponse(
@@ -185,3 +183,4 @@ def end_game():
     return EndGameResponse(
         finishDescription = game_state.message
     )
+
