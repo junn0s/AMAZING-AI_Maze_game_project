@@ -5,6 +5,11 @@ cd /home/ubuntu/maze-game
 export OPENAI_API_KEY=${OPENAI_API_KEY}
 export TAVILY_API_KEY=${TAVILY_API_KEY}
 
+# 기존 .env 삭제 후 다시 생성
+rm -f .env
+echo "OPENAI_API_KEY=${OPENAI_API_KEY}" > .env
+echo "TAVILY_API_KEY=${TAVILY_API_KEY}" >> .env
+
 source venv/bin/activate
 
 # 기존 Gunicorn 프로세스 종료

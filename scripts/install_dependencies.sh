@@ -13,11 +13,6 @@ sudo chown -R ubuntu:ubuntu venv
 # 가상환경 활성화
 source venv/bin/activate
 
-# 기존 .env 삭제 후 다시 생성
-rm -f .env
-echo "OPENAI_API_KEY=${OPENAI_API_KEY}" > .env
-echo "TAVILY_API_KEY=${TAVILY_API_KEY}" >> .env
-
 # .env 파일 로드
 export $(grep -v '^#' .env | xargs)
 
