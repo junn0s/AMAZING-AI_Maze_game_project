@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 class MazeState(BaseModel):
     setting: str
     atmosphere: str
+    num: int
 
     step: str = "start"
     message: str = ""
@@ -47,7 +48,10 @@ memory = ConversationBufferMemory(return_messages=True)
 # 3) 노드 함수들
 # -------------------------
 
-def generate_story(state: MazeState) -> MazeState:
+def generate_story(state: MazeState, setting:str, atmosphere:str) -> MazeState:
+    state.setting = setting
+    state.atmosphere = atmosphere
+
     prompt = f"""
     게임 개요: 사용자가 설정한 장소와 분위기 기반으로 AI가 미로와 스토리를 생성하며, 목적은 미로 탈출. NPC와의 상호작용이 중요한 요소.
     플레이어가 미로의 장소로 '{state.setting}', 분위기로 '{state.atmosphere}'를 입력했습니다.
@@ -77,8 +81,7 @@ def generate_story(state: MazeState) -> MazeState:
     try:
         story_data = json.loads(response)
     except json.JSONDecodeError:
-        print("LLM이 JSON 형식으로 응답하지 않았습니다. (재시도/처리 필요)")
-        print(response)
+        state.message = "생성에 실패했습니다."
         raise ValueError("Invalid JSON from LLM response")
 
     state.story_data = story_data
@@ -103,14 +106,15 @@ def first_encounter_question(state: MazeState) -> MazeState:
     당신의 말투는 : {npc.get('personality')} 입니다.
     먼저 {full_story} 내용을 기반으로 {intro_story}를 플레이어에게 소설 책 처럼 설명해주고, 이어서
     해당 세계관과 이어지며 정답이 객관적으로 확실한 3지선다 퀴즈를 1개 내주세요
+    틀리면 패널티가 있다는 말을 추가해주세요
     """
-    question_text = llm.invoke(prompt_q).content
+    question_text = llm.invoke(prompt_q)
     state.message = question_text
+    state.history.append(f"{npc['name']}: {question_text}")
     state.step = "first_encounter_followup"
     return state
 
-def first_encounter_followup(state: MazeState) -> MazeState:
-    player_input = input("> ")
+def first_encounter_followup(state: MazeState, player_input:str) -> MazeState:
     state.player_answer = player_input.strip()
 
     npc = state.story_data["npcs"][0]
@@ -121,17 +125,32 @@ def first_encounter_followup(state: MazeState) -> MazeState:
     prompt_follow = f"""
     당신은 NPC '{npc['name']}' 입니다. 당신의 말투는 : {npc.get('personality')} 입니다.
     플레이어가 '{player_answer}' 라고 답했습니다.
-    이 선택이 {message}에서의 퀴즈 정답이면 정답이라고 말하고, {full_story} 와 관련되게 미로 진행에 필요한 힌트를 하나 주고 대화를 끝내 주세요.
-    선택이 틀리면 틀렸다고 말하고 힌트를 주지 마세요.
+    이 선택이 {message}에서의 퀴즈 정답이면 정답이라고 말하고, 퀴즈 내용과 이어지며 미로 진행에 필요한 힌트를 하나 주고 대화를 끝내 주세요.
+    선택이 틀리면 틀렸다고 말하고, 퀴즈 내용과 이어지게 말만 하고 힌트는 주지 마시고 대화를 끝내세요
+
+    필수 조건 : 
+    - **위 내용을 반드시 순수한 JSON 형식으로만 출력하세요**
+    - 전체 맥락은 무조건 {full_story} 내에서 진행되어야 합니다
+    - 퀴즈 정답이 맞으면 0, 틀리면 1의 값을 아래 JSON에 answer에 줘야 합니다
+    - 나머지 전체 대화는 아래 JSON에 message에 줘야 합니다
+
+    예시:
+    {{
+        "message": "나머지 전체 대화",
+        "num": "퀴즈를 맞으면 0, 틀리면 1, 숫자만 출력"
+    }}    
     """
     follow_text = llm.invoke(prompt_follow).content
-
+    try:
+        data = json.loads(follow_text)
+        state.message = data["message"]
+        state.num = data["num"]
+    except json.JSONDecodeError:
+        state.message = "퀴즈 생성에 실패했습니다. 다시 시도해주세요"
     # history 추가
     state.history.append(f"플레이어: {player_answer}")
     state.history.append(f"{npc['name']}: {follow_text}")
-
     state.step = "second_encounter_question"
-    state.message = follow_text
     return state
 
 
@@ -147,17 +166,18 @@ def second_encounter_question(state: MazeState) -> MazeState:
     당신은 이 미로 속에서 플레이어가 만나는 두번째 NPC '{npc['name']}' (역할: {npc['role']}) 입니다.
     당신의 말투는 : {npc.get('personality')} 입니다.
     당신이 전에 냈던 퀴즈와 대답이 {history}에 들어 있습니다.
-    먼저 {history}에서 플레이어가 선택한 내용을 언급하며, 
+    먼저 {history}에서 플레이어가 선택한 내용을 살짝만 언급하며, 
     {full_story} 내용을 기반으로 {middle_story}를 플레이어에게 소설 책 처럼 설명해주고, 이어서
     해당 세계관과 이어지며 정답이 객관적으로 확실한 3지선다 퀴즈를 1개 내주세요
+    틀리면 패널티가 있다는 말을 추가해주세요
     """
     question_text = llm.invoke(prompt_q).content
     state.step = "second_encounter_followup"
+    state.history.append(f"{npc['name']}: {question_text}")
     state.message = question_text
     return state
 
-def second_encounter_followup(state: MazeState) -> MazeState:
-    player_input = input("> ")
+def second_encounter_followup(state: MazeState, player_input:str) -> MazeState:
     state.player_answer = player_input.strip()
 
     npc = state.story_data["npcs"][1]
@@ -201,8 +221,7 @@ def third_encounter_question(state: MazeState) -> MazeState:
     state.message = question_text
     return state
 
-def third_encounter_followup(state: MazeState) -> MazeState:
-    player_input = input("> ")
+def third_encounter_followup(state: MazeState, player_input:str) -> MazeState:
     state.player_answer = player_input.strip()
 
     npc = state.story_data["npcs"][2]
