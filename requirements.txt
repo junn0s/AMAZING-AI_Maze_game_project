@@ -3,3 +3,5 @@ gunicorn
 uvicorn
 pydantic
 python-dotenv
+langchain
+langgraph
