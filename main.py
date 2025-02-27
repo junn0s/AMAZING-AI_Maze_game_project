@@ -1,15 +1,15 @@
-# main.py
+from dotenv import load_dotenv
+load_dotenv()
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 
 from maze_game import MazeState, advance_game
 
 app = FastAPI()
 
-# 전역에 {게임ID: MazeState} 형태로 저장
-games = {}
+game_state: Optional[MazeState] = None
 
 # --- Request/Response 모델 ---
 class StartRequest(BaseModel):
@@ -18,15 +18,21 @@ class StartRequest(BaseModel):
     mood: str
 
 class StartResponse(BaseModel):
-    worldDescription: list[str]
+    worldDescription: str
 
-class NextRequest(BaseModel):
-    game_id: str
-    player_answer: Optional[str] = None
+class NpcQuizResponse(BaseModel):
+    QuizDescription: str
 
-class NextResponse(BaseModel):
-    lines: list[str]
-    step: str
+class NpcQuizResultRequest(BaseModel):
+    answer: str
+
+class NpcQuizResultResponse(BaseModel):
+    answerDescription: str
+    result: int
+
+class EndGameResponse(BaseModel):
+    finishDescription : str
+
 
 # ----------------------------------
 # 1) 게임 시작 API
@@ -34,48 +40,84 @@ class NextResponse(BaseModel):
 @app.post("/world", response_model=StartResponse)
 def start_game(req: StartRequest):
     # 1) 새 MazeState
-    state = MazeState(name = req.name, setting=req.location, atmosphere=req.mood, step="start")
-    state = advance_game(state)
+    global game_state
+    # num은 필수 int 필드이므로 0 등 초기값을 지정
+    game_state = MazeState(
+        name=req.name,
+        setting=req.location,
+        atmosphere=req.mood,
+        num="0",
+        step="start"
+    )
 
-    lines = state.message
+    game_state = advance_game(game_state)
 
     return StartResponse(
-        worldDescription = lines
-    )
-
-# ----------------------------------
-# 2) 다음 단계 API
-# ----------------------------------
-@app.get("/quiz", response_model=NextResponse)
-def next_step(req: NextRequest):
-    """
-    1) games에서 game_id로 MazeState 가져오기
-    2) player_answer 설정
-    3) 그래프 실행
-    4) state.message를 줄바꿈 단위로 쪼개서 반환
-    """
-    state = games.get(req.game_id, None)
-    if not state:
-        # 에러 처리 (게임 세션 없을 때)
-        return NextResponse(lines=["잘못된 game_id"], step="error")
-
-    # 2) player_answer에 사용자 답변 저장
-    state.player_answer = req.player_answer
-
-    # 3) 그래프 실행
-    raw_data = game_runner.invoke(state)
-    updated_state = MazeState.model_validate(raw_data)
-    games[req.game_id] = updated_state  # 업데이트
-
-    # 4) message를 줄바꿈 기준으로 split
-    lines = updated_state.message.split('\n') if updated_state.message else []
-
-    return NextResponse(
-        lines=lines,
-        step=updated_state.step
+        worldDescription = game_state.message
     )
 
 
-@app.post("/quiz/result", response_model=NextResponse)
+# ----------------------------------
+# 2) NPC 퀴즈 요청 API
+# ----------------------------------
+@app.get("/npc_quiz", response_model=NpcQuizResponse)
+def get_npc_quiz():
+    global game_state
+    if game_state is None:
+        raise HTTPException(status_code=400, detail="게임이 시작되지 않았습니다.")
+    
+    valid_quiz_steps = [
+        "first_encounter_question",
+        "second_encounter_question",
+        "third_encounter_question"
+    ]
 
-@app.get("/finish", response_model=NextResponse)
+    if game_state.step not in valid_quiz_steps:
+        raise HTTPException(
+            status_code=400,
+            detail=f"현재 {game_state.step} 단계에서는 새 퀴즈를 받을 수 없습니다."
+        )
+
+    # NPC 퀴즈 단계로 진행
+    game_state = advance_game(game_state)
+
+    # game_state.message가 NPC의 퀴즈 텍스트
+    return NpcQuizResponse(QuizDescription=game_state.message)
+
+# ----------------------------------
+# 3) NPC 퀴즈 정답 제출 API
+# ----------------------------------
+@app.post("/npc_quiz_result", response_model=NpcQuizResultResponse)
+def post_npc_quiz_result(req: NpcQuizResultRequest):
+    global game_state
+    if game_state is None:
+        raise HTTPException(status_code=400, detail="게임이 시작되지 않았습니다.")
+
+    valid_followup_steps = [
+        "first_encounter_followup",
+        "second_encounter_followup",
+        "third_encounter_followup"
+    ]
+    if game_state.step not in valid_followup_steps:
+        raise HTTPException(
+            status_code=400,
+            detail=f"현재 {game_state.step} 단계에서는 퀴즈 답변을 제출할 수 없습니다."
+        )
+
+    # 정답 체크
+    game_state = advance_game(game_state, req.answer)
+    return NpcQuizResultResponse(
+        answerDescription=game_state.message,
+        result=game_state.num
+    )
+
+# ----------------------------------
+# 4) 게임 결말 API
+# ----------------------------------
+@app.get("/end_game", response_model=EndGameResponse)
+def end_game():
+    global game_state
+    game_state = advance_game(game_state)
+    return EndGameResponse(
+        finishDescription = game_state.message
+    )
