@@ -1,5 +1,4 @@
 #!/bin/bash
-sudo find /home/ubuntu/maze-game/ -mindepth 1 ! -name 'server.log' -exec rm -rf {} +
 cd /home/ubuntu/maze-game
 
 # 새로운 가상환경 생성
