@@ -1,0 +1,39 @@
+name: github-action-testWeb # workflow 이름
+# workflows 테스트 github에서 돌려보고 피드백
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs: 
+  build: 
+    runs-on: ubuntu-22.04
+    steps:
+      - name: git clone
+        uses: actions/checkout@v2
+
+      - name: zip 생성
+        working-directory: ./
+        run: |
+          ls -lah  # 포함된 파일 확인
+          zip -qq -r $GITHUB_SHA.zip . -x ".git/*" # .git 폴더 제외
+        shell: bash
+
+      - name: AWS configure credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-northeast-2
+
+      - name: upload to S3
+        run: aws s3 cp --region ap-northeast-2 ./$GITHUB_SHA.zip s3://codedeploy-mello/$GITHUB_SHA.zip
+      
+      - name: deploy with AWS codeDeploy
+        run: aws deploy create-deployment
+          --application-name codedeploy-be-mello
+          --deployment-config-name CodeDeployDefault.OneAtATime
+          --deployment-group-name codedeploy-be-mello-group
+          --s3-location bucket=codedeploy-mello,bundleType=zip,key=$GITHUB_SHA.zip
