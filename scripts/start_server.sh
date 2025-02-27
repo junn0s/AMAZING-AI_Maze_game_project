@@ -2,13 +2,14 @@
 cd /home/ubuntu/maze-game
 
 # 환경 변수 설정
-export OPENAI_API_KEY=${OPENAI_API_KEY}
-export TAVILY_API_KEY=${TAVILY_API_KEY}
+set -o allexport
+source .env
+set +o allexport
 
-# 기존 .env 삭제 후 다시 생성
-rm -f .env
-echo "OPENAI_API_KEY=${OPENAI_API_KEY}" > .env
-echo "TAVILY_API_KEY=${TAVILY_API_KEY}" >> .env
+# # 기존 .env 삭제 후 다시 생성
+# rm -f .env
+# echo "OPENAI_API_KEY=${OPENAI_API_KEY}" > .env
+# echo "TAVILY_API_KEY=${TAVILY_API_KEY}" >> .env
 
 source venv/bin/activate
 
