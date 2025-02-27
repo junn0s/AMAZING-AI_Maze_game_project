@@ -16,7 +16,7 @@ jobs:
         working-directory: ./
         run: |
           ls -lah  # 포함된 파일 확인
-          zip -qq -r $GITHUB_SHA.zip . -x ".git/*" # .git 폴더 제외
+          zip -qq -r be-deploy.zip . -x ".git/*" # .git 폴더 제외
         shell: bash
 
       - name: AWS configure credentials
@@ -27,11 +27,11 @@ jobs:
           aws-region: ap-northeast-2
 
       - name: upload to S3
-        run: aws s3 cp --region ap-northeast-2 ./$GITHUB_SHA.zip s3://codedeploy-mello/$GITHUB_SHA.zip
+        run: aws s3 cp --region ap-northeast-2 ./be-deploy.zip s3://codedeploy-mello/be-deploy.zip
       
       - name: deploy with AWS codeDeploy
         run: aws deploy create-deployment
           --application-name codedeploy-be-mello
           --deployment-config-name CodeDeployDefault.OneAtATime
           --deployment-group-name codedeploy-be-mello-group
-          --s3-location bucket=codedeploy-mello,bundleType=zip,key=$GITHUB_SHA.zip
+          --s3-location bucket=codedeploy-mello,bundleType=zip,key=be-deploy.zip
