@@ -6,6 +6,6 @@ source venv/bin/activate
 pkill -f "gunicorn"
 
 # Gunicorn을 사용해 애플리케이션 실행
-nohup gunicorn -w 4 -b 0.0.0.0:8000 maze:main > server.log 2>&1 &
+nohup gunicorn -w 4 -b 0.0.0.0:8000 --chdir /home/ubuntu/maze-game -k uvicorn.workers.UvicornWorker main:app > server.log 2>&1 &
 
 echo "🚀 Maze Game Server started successfully!"
