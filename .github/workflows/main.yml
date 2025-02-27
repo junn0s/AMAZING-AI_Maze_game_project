@@ -23,6 +23,7 @@ jobs:
         run: |
           ls -lah  # 포함된 파일 확인
           zip -qq -r be-deploy.zip . -x ".git/*" # .git 폴더 제외
+          zip -qq -r be-deploy.zip .env # .env 파일 강제 포함
         shell: bash
 
       - name: AWS configure credentials
