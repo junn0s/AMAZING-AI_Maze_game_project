@@ -7,7 +7,7 @@ from typing import Optional, List
 
 from llm_langchain import MazeState, advance_game
 
-app = FastAPI()
+app = FastAPI() 
 
 game_state: Optional[MazeState] = None
 
