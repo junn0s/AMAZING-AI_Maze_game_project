@@ -2,16 +2,35 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
 
 from llm_langchain import MazeState, advance_game
+from image_generate import generate_image
 
 app = FastAPI() 
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 필요한 경우 특정 도메인만 허용하도록 수정
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 game_state: Optional[MazeState] = None
 
 # --- Request/Response 모델 ---
+class MazeResponse(BaseModel):
+    width: int
+    height: int
+    maze: List[List[int]]
+    userPos: List[int]
+    npcCnt: int
+    npcPos: List[List[int]]
+    exitPos: List[int]
+
 class StartRequest(BaseModel):
     name : str
     location: str
@@ -19,6 +38,7 @@ class StartRequest(BaseModel):
 
 class StartResponse(BaseModel):
     worldDescription: str
+    image: str
 
 class NpcQuizResponse(BaseModel):
     QuizDescription: str
@@ -32,6 +52,41 @@ class NpcQuizResultResponse(BaseModel):
 
 class EndGameResponse(BaseModel):
     finishDescription : str
+
+
+
+# ----------------------------------
+# 0) 미로 출력
+# ----------------------------------
+
+@app.get("/maze", response_model=MazeResponse)
+def get_maze():
+    return MazeResponse(
+        width = 11,
+        height =  11,
+        maze = [
+            [1, 1, 1, 1, 1, 1, 4, 1, 1, 1, 1],
+            [1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1],
+            [1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1],
+            [1, 2, 0, 0, 1, 0, 2, 1, 0, 1, 1],
+            [1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1],
+            [1, 1, 0, 0, 0, 3, 0, 0, 0, 0, 1],
+            [1, 0, 0, 1, 1, 0, 1, 1, 1, 0, 1],
+            [1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1],
+            [1, 1, 1, 0, 0, 0, 1, 0, 1, 1, 1],
+            [1, 0, 0, 0, 1, 0, 1, 0, 0, 2, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+        ],
+        userPos = [5,5],
+        npcCnt = 3,
+        npcPos = [
+            [3, 1],
+            [3, 6],
+            [9, 9]
+        ],
+        exitPos = [0, 6]
+    )
+
 
 
 # ----------------------------------
@@ -52,8 +107,15 @@ def start_game(req: StartRequest):
 
     game_state = advance_game(game_state)
 
+    image_prompt = (
+        f"The location is {req.location} and the mood is {req.mood}. Create a pixel-style image related to this location and mood."
+    )
+    image_url = generate_image(image_prompt, size="1024x1024")
+
+
     return StartResponse(
-        worldDescription = game_state.message
+        worldDescription = game_state.message,
+        image = image_url
     )
 
 
@@ -121,3 +183,4 @@ def end_game():
     return EndGameResponse(
         finishDescription = game_state.message
     )
+
