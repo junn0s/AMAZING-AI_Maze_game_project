@@ -1,5 +1,10 @@
 #!/bin/bash
 cd /home/ubuntu/maze-game
+
+# 환경 변수 설정
+export OPENAI_API_KEY=${OPENAI_API_KEY}
+export TAVILY_API_KEY=${TAVILY_API_KEY}
+
 source venv/bin/activate
 
 # 기존 Gunicorn 프로세스 종료
