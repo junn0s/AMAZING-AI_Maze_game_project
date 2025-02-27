@@ -2,9 +2,9 @@
 
 from fastapi import FastAPI
 from pydantic import BaseModel
-import uuid
+from typing import Optional
 
-from maze_game import MazeState
+from maze_game import MazeState, advance_game
 
 app = FastAPI()
 
@@ -13,17 +13,16 @@ games = {}
 
 # --- Request/Response 모델 ---
 class StartRequest(BaseModel):
-    setting: str
-    atmosphere: str
+    name : str
+    location: str
+    mood: str
 
 class StartResponse(BaseModel):
-    game_id: str
-    lines: list[str]
-    step: str
+    worldDescription: list[str]
 
 class NextRequest(BaseModel):
     game_id: str
-    player_answer: str
+    player_answer: Optional[str] = None
 
 class NextResponse(BaseModel):
     lines: list[str]
@@ -32,37 +31,22 @@ class NextResponse(BaseModel):
 # ----------------------------------
 # 1) 게임 시작 API
 # ----------------------------------
-@app.post("/start_game", response_model=StartResponse)
+@app.post("/world", response_model=StartResponse)
 def start_game(req: StartRequest):
-    """
-    1) 새 MazeState 생성
-    2) story_graph 첫 번째 노드(start) 실행
-    3) state.message를 줄바꿈 단위로 쪼개서 반환
-    """
     # 1) 새 MazeState
-    state = MazeState(setting=req.setting, atmosphere=req.atmosphere)
+    state = MazeState(name = req.name, setting=req.location, atmosphere=req.mood, step="start")
+    state = advance_game(state)
 
-    # 2) 그래프 실행
-    raw_data = game_runner.invoke(state)
-    new_state = MazeState.model_validate(raw_data)
-
-    # 3) UUID 발급 후 games에 저장
-    game_id = str(uuid.uuid4())
-    games[game_id] = new_state
-
-    # 4) message를 줄바꿈 기준으로 split
-    lines = new_state.message.split('\n') if new_state.message else []
+    lines = state.message
 
     return StartResponse(
-        game_id=game_id,
-        lines=lines,
-        step=new_state.step
+        worldDescription = lines
     )
 
 # ----------------------------------
 # 2) 다음 단계 API
 # ----------------------------------
-@app.post("/next_step", response_model=NextResponse)
+@app.get("/quiz", response_model=NextResponse)
 def next_step(req: NextRequest):
     """
     1) games에서 game_id로 MazeState 가져오기
@@ -90,3 +74,8 @@ def next_step(req: NextRequest):
         lines=lines,
         step=updated_state.step
     )
+
+
+@app.post("/quiz/result", response_model=NextResponse)
+
+@app.get("/finish", response_model=NextResponse)
