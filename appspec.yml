@@ -1,19 +1,26 @@
-version: 0.0 # 코드 디플로이 용
+version: 0.0
 os: linux
 files:
-  - source:  .
-    destination: /var/www/html
+  - source: .
+    destination: /home/ubuntu/maze-game
     overwrite: yes
 
 permissions:
-  - object: /
-    pattern: "**"
-    owner: root
-    group: root
+  - object: /home/ubuntu/maze-game/
+    owner: ubuntu
+    group: ubuntu
     mode: 755
 
 hooks:
-  ApplicationStart:
-    - location: scripts/after_deploy.sh
+  BeforeInstall:
+    - location: scripts/remove_old_files.sh
       timeout: 300
-      runas: root
+      runas: ubuntu
+  AfterInstall:
+    - location: scripts/install_dependencies.sh
+      timeout: 300
+      runas: ubuntu
+  ApplicationStart:
+    - location: scripts/start_server.sh
+      timeout: 300
+      runas: ubuntu
