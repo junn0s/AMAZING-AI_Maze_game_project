@@ -19,7 +19,6 @@ export $(grep -v '^#' .env | xargs)
 # 의존성 설치
 pip install --upgrade pip
 pip install -r requirements.txt
-pip uninstall -y langchain
 
 # Gunicorn 설치
 pip install gunicorn

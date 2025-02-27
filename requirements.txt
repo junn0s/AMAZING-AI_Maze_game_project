@@ -3,6 +3,7 @@ gunicorn
 uvicorn
 pydantic
 python-dotenv
+langchain
 langchain-community
 langgraph
 openai
