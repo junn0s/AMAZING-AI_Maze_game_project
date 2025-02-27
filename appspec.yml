@@ -12,10 +12,6 @@ permissions:
     mode: 755
 
 hooks:
-  BeforeInstall:
-    - location: scripts/remove_old_files.sh
-      timeout: 300
-      runas: ubuntu
   AfterInstall:
     - location: scripts/install_dependencies.sh
       timeout: 300
