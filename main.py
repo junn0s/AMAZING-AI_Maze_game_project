@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
 
-from maze_game import MazeState, advance_game
+from llm_langchain import MazeState, advance_game
 from image_generate import generate_image
 
 app = FastAPI()
