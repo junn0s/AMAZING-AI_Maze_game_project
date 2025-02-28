@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
@@ -36,6 +36,78 @@ class MazeResponse(BaseModel):
 class MazeRequest(BaseModel):
     loc : List[int]
 
+def get_maze_data() -> MazeResponse:
+    return MazeResponse(
+        width=11,
+        height=11,
+        maze=[
+            [1, 1, 1, 1, 1, 1, 4, 1, 1, 1, 1],
+            [1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1],
+            [1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1],
+            [1, 2, 0, 0, 1, 0, 2, 1, 0, 1, 1],
+            [1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1],
+            [1, 1, 0, 0, 0, 3, 0, 0, 0, 0, 1],
+            [1, 0, 0, 1, 1, 0, 1, 1, 1, 0, 1],
+            [1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1],
+            [1, 1, 1, 0, 0, 0, 1, 0, 1, 1, 1],
+            [1, 0, 0, 0, 1, 0, 1, 0, 0, 2, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+        ],
+        userPos=[5, 5],
+        npcCnt=3,
+        npcPos=[
+            [3, 1],
+            [3, 6],
+            [9, 9]
+        ],
+        exitPos=[0, 6]
+    )
+
+
+def post_maze_data(req: MazeRequest) -> MazeResponse:
+    maze_data = {
+        "width": 11,
+        "height": 11,
+        "maze": [
+            [1, 1, 1, 1, 1, 1, 4, 1, 1, 1, 1],
+            [1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1],
+            [1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1],
+            [1, 2, 0, 0, 1, 0, 2, 1, 0, 1, 1],
+            [1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1],
+            [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+            [1, 0, 0, 1, 1, 0, 1, 1, 1, 0, 1],
+            [1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1],
+            [1, 1, 1, 0, 0, 0, 1, 0, 1, 1, 1],
+            [1, 0, 0, 0, 1, 0, 1, 0, 0, 2, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+        ],
+        "userPos": [5, 5],
+        "npcCnt": 3,
+        "npcPos": [
+            [3, 1],
+            [3, 6],
+            [9, 9]
+        ],
+        "exitPos": [0, 6]
+    }
+
+    # 요청으로부터 입력받은 좌표 (예: [행, 열])
+    input_coord = req.loc
+
+    # NPC 좌표 리스트에서 입력 좌표와 일치하는 좌표 제거
+    new_npcPos = [npc for npc in maze_data["npcPos"] if npc != input_coord]
+    maze_data["npcPos"] = new_npcPos
+    maze_data["npcCnt"] = len(new_npcPos)
+
+    # 사용자 좌표 업데이트
+    maze_data["userPos"] = input_coord
+
+    # 해당 좌표에 값 3으로 설정
+    row, col = input_coord
+    maze_data["maze"][row][col] = 3
+
+    return MazeResponse(**maze_data)
+
 class StartRequest(BaseModel):
     name : str
     location: str
@@ -67,80 +139,13 @@ class EndGameResponse(BaseModel):
 # 0) 미로 출력
 # ----------------------------------
 
-@app.get("/maze", response_model=MazeResponse)
-def get_maze():
-    return MazeResponse(
-        width = 11,
-        height =  11,
-        maze = [
-            [1, 1, 1, 1, 1, 1, 4, 1, 1, 1, 1],
-            [1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1],
-            [1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1],
-            [1, 2, 0, 0, 1, 0, 2, 1, 0, 1, 1],
-            [1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1],
-            [1, 1, 0, 0, 0, 3, 0, 0, 0, 0, 1],
-            [1, 0, 0, 1, 1, 0, 1, 1, 1, 0, 1],
-            [1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1],
-            [1, 1, 1, 0, 0, 0, 1, 0, 1, 1, 1],
-            [1, 0, 0, 0, 1, 0, 1, 0, 0, 2, 1],
-            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
-        ],
-        userPos = [5,5],
-        npcCnt = 3,
-        npcPos = [
-            [3, 1],
-            [3, 6],
-            [9, 9]
-        ],
-        exitPos = [0, 6]
-    )
+@app.post("/maze", response_model=MazeResponse)
+def maze_endpoint(req: Optional[MazeRequest] = Body(default=None)):
+    if req is None:
+        return get_maze_data()
+    else:
+        return post_maze_data(req)
 
-
-@app.post("/maze_mod", response_model=MazeResponse)
-def post_maze(req: MazeRequest):
-    # 기존 미로 데이터 정의 (예시)
-    maze_data = {
-        "width": 11,
-        "height": 11,
-        "maze": [
-            [1, 1, 1, 1, 1, 1, 4, 1, 1, 1, 1],
-            [1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1],
-            [1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1],
-            [1, 2, 0, 0, 1, 0, 2, 1, 0, 1, 1],
-            [1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1],
-            [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-            [1, 0, 0, 1, 1, 0, 1, 1, 1, 0, 1],
-            [1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1],
-            [1, 1, 1, 0, 0, 0, 1, 0, 1, 1, 1],
-            [1, 0, 0, 0, 1, 0, 1, 0, 0, 2, 1],
-            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
-        ],
-        "userPos": [5, 5],
-        "npcCnt": 3,
-        "npcPos": [
-            [3, 1],
-            [3, 6],
-            [9, 9]
-        ],
-        "exitPos": [0, 6]
-    }
-
-    # 클라이언트로부터 입력받은 좌표 (예: [행, 열])
-    input_coord = req.loc
-
-    # NPC 좌표 리스트에서 입력 좌표와 일치하는 좌표 제거
-    new_npcPos = [npc for npc in maze_data["npcPos"] if npc != input_coord]
-    maze_data["npcPos"] = new_npcPos
-    maze_data["npcCnt"] = len(new_npcPos)
-
-    # 사용자 좌표도 업데이트 (원하는 대로 설정 가능)
-    maze_data["userPos"] = input_coord
-
-    # 미로의 input_coord 위치에 값을 3으로 설정
-    row, col = input_coord
-    maze_data["maze"][row][col] = 3
-
-    return MazeResponse(**maze_data)
 
 
 
