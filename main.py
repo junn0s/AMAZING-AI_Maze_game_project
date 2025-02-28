@@ -31,6 +31,11 @@ class MazeResponse(BaseModel):
     npcPos: List[List[int]]
     exitPos: List[int]
 
+
+
+class MazeRequest(BaseModel):
+    loc : List[int]
+
 class StartRequest(BaseModel):
     name : str
     location: str
@@ -41,7 +46,6 @@ class StartResponse(BaseModel):
     image: str
 
 class NpcQuizResponse(BaseModel):
-    story : str
     quiz : str
     option1 : str
     option2 : str
@@ -92,6 +96,53 @@ def get_maze():
     )
 
 
+@app.post("/maze_mod", response_model=MazeResponse)
+def post_maze(req: MazeRequest):
+    # 기존 미로 데이터 정의 (예시)
+    maze_data = {
+        "width": 11,
+        "height": 11,
+        "maze": [
+            [1, 1, 1, 1, 1, 1, 4, 1, 1, 1, 1],
+            [1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1],
+            [1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1],
+            [1, 2, 0, 0, 1, 0, 2, 1, 0, 1, 1],
+            [1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1],
+            [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+            [1, 0, 0, 1, 1, 0, 1, 1, 1, 0, 1],
+            [1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1],
+            [1, 1, 1, 0, 0, 0, 1, 0, 1, 1, 1],
+            [1, 0, 0, 0, 1, 0, 1, 0, 0, 2, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+        ],
+        "userPos": [5, 5],
+        "npcCnt": 3,
+        "npcPos": [
+            [3, 1],
+            [3, 6],
+            [9, 9]
+        ],
+        "exitPos": [0, 6]
+    }
+
+    # 클라이언트로부터 입력받은 좌표 (예: [행, 열])
+    input_coord = req.loc
+
+    # NPC 좌표 리스트에서 입력 좌표와 일치하는 좌표 제거
+    new_npcPos = [npc for npc in maze_data["npcPos"] if npc != input_coord]
+    maze_data["npcPos"] = new_npcPos
+    maze_data["npcCnt"] = len(new_npcPos)
+
+    # 사용자 좌표도 업데이트 (원하는 대로 설정 가능)
+    maze_data["userPos"] = input_coord
+
+    # 미로의 input_coord 위치에 값을 3으로 설정
+    row, col = input_coord
+    maze_data["maze"][row][col] = 3
+
+    return MazeResponse(**maze_data)
+
+
 
 # ----------------------------------
 # 1) 게임 시작 API
@@ -107,7 +158,6 @@ def start_game(req: StartRequest):
         atmosphere=req.mood,
         num="0",
         step="start",
-        story = "",
         quiz = "",
         option1 = "",
         option2 = "",
@@ -154,7 +204,6 @@ def get_npc_quiz():
 
     # game_state.message가 NPC의 퀴즈 텍스트
     return NpcQuizResponse(
-        story = game_state.story,
         quiz = game_state.quiz,
         option1 = game_state.option1,
         option2 = game_state.option2,
@@ -199,3 +248,4 @@ def end_game():
     return EndGameResponse(
         finishDescription = game_state.message
     )
+
