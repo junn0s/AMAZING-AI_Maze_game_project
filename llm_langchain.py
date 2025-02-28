@@ -20,10 +20,19 @@ from pydantic import BaseModel, Field
 # 1) Pydantic 모델 정의
 # -------------------------
 class MazeState(BaseModel):
+    name : str
     setting: str
     atmosphere: str
+
+    story : str
+    quiz : str
+    option1 : str
+    option2 : str
+    option3 : str
+
     num: str
-    name : str
+    
+    
 
     step: str = "start"
     message: str = ""
@@ -115,9 +124,32 @@ def first_encounter_question(state: MazeState) -> MazeState:
     당신의 말투는 : {npc.get('personality')} 입니다.
     처음에는 {intro_story}를 얘기하시고, 그 내용에 기반한 객관적으로 정답이 확실한 3지선다 퀴즈를 1개 내주세요
     틀리면 패널티가 있다는 말을 추가해주세요
+
+    필수 조건 : 
+    - **위 내용을 반드시 아래 내용과 동일한 순수한 JSON 형식으로만 출력하세요**
+    - 그리고 삼중 백틱(```)이나 다른 코드 블록 문법은 절대 사용하지 마.
+    내용:
+    {{
+        "intro_story": "intro_story를 여기에 적어주세요"
+        "quiz": "퀴즈 질문을 여기에 적어주세요",
+        "option1":  "1번 선택지"
+        "option2":  "2번 선택지"
+        "option3":  "3번 선택지"
+    }} 
+
     """
     question_text = llm.invoke(prompt_q).content
-    state.message = question_text
+    cleaned_response = clean_response(question_text)
+    try:
+        data = json.loads(cleaned_response)
+        state.story = data["intro_story"]
+        state.quiz = data["quiz"]
+        state.option1 = data["option1"]
+        state.option2 = data["option2"]
+        state.option3 = data["option3"]
+    except json.JSONDecodeError:
+        state.story = "퀴즈 생성에 실패했습니다. 다시 시도해주세요"
+
     state.history.append(f"{npc['name']}: {question_text}")
     state.step = "first_encounter_followup"
     return state
@@ -138,6 +170,7 @@ def first_encounter_followup(state: MazeState, player_input:str) -> MazeState:
     - **위 내용을 반드시 아래 내용과 동일한 순수한 JSON 형식으로만 출력하세요**
     - 그리고 삼중 백틱(```)이나 다른 코드 블록 문법은 절대 사용하지 마.
 
+
     내용:
     {{
         "message": "플레이어 대답이 맞다면 정답이라는 식으로 한 마디 말하고, 자연스러운 대화를 추가로 한 마디 하고 대화를 끝내세요.
@@ -153,7 +186,7 @@ def first_encounter_followup(state: MazeState, player_input:str) -> MazeState:
         state.message = data["message"]
         state.num = data["answer"]
     except json.JSONDecodeError:
-        state.message = "퀴즈 생성에 실패했습니다. 다시 시도해주세요"
+        state.message = "결과 로드에 실패했습니다. 다시 시도해주세요"
     # history 추가
     state.history.append(f"플레이어: {player_answer}")
     state.history.append(f"{npc['name']}: {follow_text}")
@@ -172,10 +205,35 @@ def second_encounter_question(state: MazeState) -> MazeState:
     당신의 말투는 : {npc.get('personality')} 입니다.
     처음에는 {middle_story}를 얘기하시고, 그 내용에 기반한 객관적으로 정답이 확실한 3지선다 퀴즈를 1개 내주세요
     틀리면 패널티가 있다는 말을 추가해주세요
+
+    필수 조건 : 
+    - **위 내용을 반드시 아래 내용과 동일한 순수한 JSON 형식으로만 출력하세요**
+    - 그리고 삼중 백틱(```)이나 다른 코드 블록 문법은 절대 사용하지 마.
+내용:
+    {{
+        "middle_story": "middle_story를 여기에 적어주세요"
+        "quiz": "퀴즈 질문을 여기에 적어주세요",
+        "option1":  "1번 선택지"
+        "option2":  "2번 선택지"
+        "option3":  "3번 선택지"
+    }} 
+
     """
     question_text = llm.invoke(prompt_q).content
+    cleaned_response = clean_response(question_text)
+    try:
+        data = json.loads(cleaned_response)
+        state.story = data["middle_story"]
+        state.quiz = data["quiz"]
+        state.option1 = data["option1"]
+        state.option2 = data["option2"]
+        state.option3 = data["option3"]
+    except json.JSONDecodeError:
+        state.story = "퀴즈 생성에 실패했습니다. 다시 시도해주세요"
+
     state.step = "second_encounter_followup"
     state.history.append(f"{npc['name']}: {question_text}")
+
     state.message = question_text
     return state
 
@@ -209,7 +267,7 @@ def second_encounter_followup(state: MazeState, player_input:str) -> MazeState:
         state.message = data["message"]
         state.num = data["answer"]
     except json.JSONDecodeError:
-        state.message = "퀴즈 생성에 실패했습니다. 다시 시도해주세요"
+        state.message = "결과 로드에 실패했습니다. 다시 시도해주세요"
 
     state.history.append(f"플레이어: {player_answer}")
     state.history.append(f"{npc['name']}: {follow_text}")
@@ -228,8 +286,32 @@ def third_encounter_question(state: MazeState) -> MazeState:
     당신의 말투는 : {npc.get('personality')} 입니다.
     처음에는 {final_story}를 얘기하시고, 그 내용에 기반한 객관적으로 정답이 확실한 3지선다 퀴즈를 1개 내주세요
     틀리면 패널티가 있다는 말을 추가해주세요
+
+    필수 조건 : 
+    - **위 내용을 반드시 아래 내용과 동일한 순수한 JSON 형식으로만 출력하세요**
+    - 그리고 삼중 백틱(```)이나 다른 코드 블록 문법은 절대 사용하지 마.
+내용:
+    {{
+        "final_story": "final_story를 여기에 적어주세요"
+        "quiz": "퀴즈 질문을 여기에 적어주세요",
+        "option1":  "1번 선택지"
+        "option2":  "2번 선택지"
+        "option3":  "3번 선택지"
+    }} 
+
     """
     question_text = llm.invoke(prompt_q).content
+    cleaned_response = clean_response(question_text)
+    try:
+        data = json.loads(cleaned_response)
+        state.story = data["final_story"]
+        state.quiz = data["quiz"]
+        state.option1 = data["option1"]
+        state.option2 = data["option2"]
+        state.option3 = data["option3"]
+    except json.JSONDecodeError:
+        state.story = "퀴즈 생성에 실패했습니다. 다시 시도해주세요"
+
     state.step = "third_encounter_followup"
     state.history.append(f"{npc['name']}: {question_text}")
     state.message = question_text
@@ -265,7 +347,7 @@ def third_encounter_followup(state: MazeState, player_input:str) -> MazeState:
         state.message = data["message"]
         state.num = data["answer"]
     except json.JSONDecodeError:
-        state.message = "퀴즈 생성에 실패했습니다. 다시 시도해주세요"
+        state.message = "결과 로드에 실패했습니다. 다시 시도해주세요"
     # history 추가
     state.history.append(f"플레이어: {player_answer}")
     state.history.append(f"{npc['name']}: {follow_text}")
@@ -322,13 +404,6 @@ def advance_game(state: MazeState, player_answer:Optional[str]=None) -> MazeStat
         state.message = f"알 수 없는 단계: {step}"
 
     return state    
-
-
-
-
-
-
-
 
 # -------------------------
 # 4) 실행
