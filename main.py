@@ -9,7 +9,7 @@ from typing import Optional, List
 from llm_langchain import MazeState, advance_game
 from image_generate import generate_image
 
-app = FastAPI() 
+app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
@@ -41,7 +41,11 @@ class StartResponse(BaseModel):
     image: str
 
 class NpcQuizResponse(BaseModel):
-    QuizDescription: str
+    story : str
+    quiz : str
+    option1 : str
+    option2 : str
+    option3 : str
 
 class NpcQuizResultRequest(BaseModel):
     answer: str
@@ -102,7 +106,12 @@ def start_game(req: StartRequest):
         setting=req.location,
         atmosphere=req.mood,
         num="0",
-        step="start"
+        step="start",
+        story = "",
+        quiz = "",
+        option1 = "",
+        option2 = "",
+        option3 = ""
     )
 
     game_state = advance_game(game_state)
@@ -111,6 +120,7 @@ def start_game(req: StartRequest):
         f"The location is {req.location} and the mood is {req.mood}. Create a pixel-style image related to this location and mood."
     )
     image_url = generate_image(image_prompt, size="1024x1024")
+
 
     return StartResponse(
         worldDescription = game_state.message,
@@ -143,7 +153,14 @@ def get_npc_quiz():
     game_state = advance_game(game_state)
 
     # game_state.message가 NPC의 퀴즈 텍스트
-    return NpcQuizResponse(QuizDescription=game_state.message)
+    return NpcQuizResponse(
+        story = game_state.story,
+        quiz = game_state.quiz,
+        option1 = game_state.option1,
+        option2 = game_state.option2,
+        option3 = game_state.option3
+
+    )
 
 # ----------------------------------
 # 3) NPC 퀴즈 정답 제출 API
@@ -182,4 +199,3 @@ def end_game():
     return EndGameResponse(
         finishDescription = game_state.message
     )
-
